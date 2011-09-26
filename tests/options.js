@@ -72,6 +72,36 @@ exports.latedef = function () {
 };
 
 /**
+ * The `proto` and `iterator` options allow you to prohibit the use of the
+ * special `__proto__` and `__iterator__` properties, respectively.
+ */
+exports.testProtoAndIterator = function () {
+    var source = fs.readFileSync(__dirname + '/fixtures/protoiterator.js', 'utf8');
+    var json = '{"__proto__": true, "__iterator__": false, "_identifier": null, "property": 123}';
+
+    // JSHint should not allow the `__proto__` and
+    // `__iterator__` properties by default
+    assert.ok(!JSHINT(source));
+    assert.eql(JSHINT.errors.length, 7);
+
+    for (var i = 0, err; err = JSHINT.errors[i]; i++) {
+        if ([7, 8, 10, 33, 37].indexOf(err.line) > -1)
+            assert.eql(err.reason, "The '__proto__' property is deprecated.");
+        else
+            assert.eql(err.reason, "'__iterator__' is only available in JavaScript 1.7.");
+    }
+
+    assert.ok(!JSHINT(json));
+    assert.eql(JSHINT.errors[0].reason, "The '__proto__' key may produce unexpected results.");
+    assert.eql(JSHINT.errors[1].reason, "The '__iterator__' key may produce unexpected results.");
+
+    // Should not report any errors when proto and iterator
+    // options are on
+    assert.ok(JSHINT(source, { proto: true, iterator: true }));
+    assert.ok(JSHINT(json,   { proto: true, iterator: true }));
+};
+
+/**
  * Option `curly` allows you to enforce the use of curly braces around
  * control blocks. JavaScript allows one-line blocks to go without curly
  * braces but some people like to always use curly bracse. This option is
@@ -152,13 +182,58 @@ exports.nonew = function () {
 
 /** Option `asi` allows you to use automatic-semicolon insertion */
 exports.asi = function () {
-    var code = 'hello()';
+    var src = fs.readFileSync(__dirname + '/fixtures/asi.js', 'utf8');
 
-    assert.ok(!JSHINT(code));
-    assert.eql(JSHINT.errors[0].line, 1);
+    assert.ok(!JSHINT(src));
+    assert.eql(JSHINT.errors.length, 9);
+
+    var errors = [
+        [2, "Line breaking error 'return'."],
+        [3, "Expected an identifier and instead saw 'var'."],
+        [3, "Missing semicolon."],
+        [3, "Missing semicolon."], // TODO: Why there are two Missing semicolon warnings?
+        [7, "Line breaking error 'continue'."],
+        [7, "Missing semicolon."],
+        [8, "Line breaking error 'break'."],
+        [8, "Missing semicolon."],
+        [11, "Missing semicolon."]
+    ];
+
+    for (var i = 0, err; err = errors[i]; i++) {
+        assert.eql(JSHINT.errors[i].line, err[0]);
+        assert.eql(JSHINT.errors[i].reason, err[1]);
+    }
+
+    assert.ok(JSHINT(src, { asi: true }));
+};
+
+/** Option `lastsemic` allows you to skip the semicolon after last statement in a block,
+  * if that statement is followed by the closing brace on the same line. */
+exports.lastsemic = function () {
+    var src = fs.readFileSync(__dirname + '/fixtures/lastsemic.js', 'utf8');
+
+    // without lastsemic
+    assert.eql(false, JSHINT(src));
+    assert.eql(JSHINT.errors.length, 3);
+    assert.eql(JSHINT.errors[0].line, 2);
+    assert.eql(JSHINT.errors[0].reason, 'Missing semicolon.');  // missing semicolon in the middle of a block
+    assert.eql(JSHINT.errors[1].line, 4);
+    assert.eql(JSHINT.errors[1].reason, 'Missing semicolon.');  // missing semicolon in a one-liner function
+    assert.eql(JSHINT.errors[2].line, 5);
+    assert.eql(JSHINT.errors[2].reason, 'Missing semicolon.');  // missing semicolon at the end of a block
+
+    // with lastsemic
+    assert.eql(false, JSHINT(src, { lastsemic: true }));
+    assert.eql(JSHINT.errors.length, 2);
+    assert.eql(JSHINT.errors[0].line, 2);
     assert.eql(JSHINT.errors[0].reason, 'Missing semicolon.');
+    assert.eql(JSHINT.errors[1].line, 5);
+    assert.eql(JSHINT.errors[1].reason, 'Missing semicolon.');
+    // this line is valid now: [1, 2, 3].forEach(function(i) { print(i) });
+    // line 5 isn't, because the block doesn't close on the same line
 
-    assert.ok(JSHINT(code, { asi: true }));
+    // it shouldn't interfere with asi option
+    assert.eql(true, JSHINT(src, { lastsemic: true, asi: true }));
 };
 
 /**
@@ -202,6 +277,32 @@ exports.undef = function () {
     assert.eql(JSHINT.errors[0].reason, "'undef' is not defined.");
     assert.eql(JSHINT.errors[1].line, 6);
     assert.eql(JSHINT.errors[1].reason, "'localUndef' is not defined.");
+};
+
+/** Option `scripturl` allows the use of javascript-type URLs */
+exports.scripturl = function() {
+    var code = "var foo = { 'count': 12, 'href': 'javascript:' };",
+        src = fs.readFileSync(__dirname + '/fixtures/scripturl.js', 'utf8');
+
+    // Make sure there is an error
+    assert.ok(!JSHINT(code));
+    assert.eql(JSHINT.errors.length, 1);
+    assert.eql(JSHINT.errors[0].reason, 'Script URL.');
+
+    // Make sure the error goes away when javascript URLs are tolerated
+    assert.ok(JSHINT(code, { scripturl: true }));
+
+    // Make sure an error exists for labels that look like URLs
+    assert.ok(!JSHINT(src));
+    assert.eql(JSHINT.errors.length, 1);
+    assert.eql(JSHINT.errors[0].line, 2);
+    assert.eql(JSHINT.errors[0].reason, "Label 'javascript' looks like a javascript url.");
+
+    // Make sure the label error exists even if javascript URLs are tolerated
+    assert.ok(!JSHINT(src, { scripturl: true }));
+    assert.eql(JSHINT.errors.length, 1);
+    assert.eql(JSHINT.errors[0].line, 2);
+    assert.eql(JSHINT.errors[0].reason, "Label 'javascript' looks like a javascript url.");
 };
 
 /**
@@ -282,13 +383,17 @@ exports.eqnull = function () {
     var code = [
         'if (e == null) doSomething();'
       , 'if (null == e) doSomething();'
+      , 'if (e != null) doSomething();'
+      , 'if (null != e) doSomething();'
     ];
 
     // By default, warn about `== null` comparison
     assert.ok(!JSHINT(code));
-    assert.eql(JSHINT.errors.length, 2);
+    assert.eql(JSHINT.errors.length, 4);
     assert.eql(JSHINT.errors[0].reason, "Use '===' to compare with 'null'.");
     assert.eql(JSHINT.errors[1].reason, "Use '===' to compare with 'null'.");
+    assert.eql(JSHINT.errors[2].reason, "Use '!==' to compare with 'null'.");
+    assert.eql(JSHINT.errors[3].reason, "Use '!==' to compare with 'null'.");
 
     // But when `eqnull` is true, no questions asked
     assert.ok(JSHINT(code, { eqnull: true }));
@@ -512,8 +617,9 @@ exports.sub = function () {
 
 /** Option `strict` requires you to use "use strict"; */
 exports.strict = function () {
-    var code  = "(function () { return; }());",
-        code1 = '(function () { "use strict"; return; }());';
+    var code  = "(function () { return; }());";
+    var code1 = '(function () { "use strict"; return; }());';
+    var src = fs.readFileSync(__dirname + '/fixtures/strict_violations.js', 'utf8');
 
     assert.ok(JSHINT(code));
     assert.ok(JSHINT(code1));
@@ -523,6 +629,16 @@ exports.strict = function () {
     assert.eql(JSHINT.errors[0].reason, 'Missing "use strict" statement.');
 
     assert.ok(JSHINT(code1, { strict: true }));
+
+    // Test for strict mode violations
+    assert.ok(!JSHINT(src, { strict: true }));
+    assert.eql(JSHINT.errors.length, 3);
+    assert.eql(JSHINT.errors[0].line, 4);
+    assert.eql(JSHINT.errors[0].reason, 'Possible strict violation.');
+    assert.eql(JSHINT.errors[1].line, 7);
+    assert.eql(JSHINT.errors[1].reason, 'Strict violation.');
+    assert.eql(JSHINT.errors[2].line, 8);
+    assert.eql(JSHINT.errors[2].reason, 'Strict violation.');
 };
 
 /** Option `globalstrict` allows you to use global "use strict"; */
@@ -542,6 +658,9 @@ exports.globalstrict = function () {
     assert.ok(!JSHINT(code[1], { globalstrict: true }));
     assert.eql(JSHINT.errors.length, 1);
     assert.eql(JSHINT.errors[0].reason, 'Missing "use strict" statement.');
+
+    // Don't enforce "use strict"; if strict has been explicitly set to false
+    assert.ok(JSHINT(code[1], { globalstrict: true, strict: false }));
 };
 
 /** Option `regexp` disallows the use of . and [^...] in regular expressions. */
@@ -611,17 +730,76 @@ exports.white = function () {
     assert.eql(JSHINT.errors[3].reason, "Missing space after 'if'.");
     assert.eql(JSHINT.errors[4].line, 6);
     assert.eql(JSHINT.errors[4].reason, "Missing space after ')'.");
+};
 
-    // Check for trailing whitespaces
+exports.trailing = function () {
+    var src = fs.readFileSync(__dirname + '/fixtures/white.js', 'utf8');
+
+    assert.ok(JSHINT(src));
+    assert.ok(!JSHINT(src, { trailing: true }));
+    assert.eql(JSHINT.errors.length, 2);
+    assert.eql(JSHINT.errors[0].line, 8);
+    assert.eql(JSHINT.errors[0].reason, "Trailing whitespace.");
+    assert.eql(JSHINT.errors[1].line, 9);
+    assert.eql(JSHINT.errors[1].reason, "Trailing whitespace.");
+};
+
+exports.regexdash = function () {
     var code = [
-        'hey();'
-      , 'sup(); '
-      , 'notmuch();'
+        'var a = /[-ab]/;'
+      , 'var a = /[ab-]/;'
     ];
 
-    assert.ok(JSHINT(code));
-    assert.ok(!JSHINT(code, { white: true }));
+    // Default behavior
+    assert.ok(!JSHINT(code[0]));
     assert.eql(JSHINT.errors.length, 1);
-    assert.eql(JSHINT.errors[0].line, 2);
-    assert.eql(JSHINT.errors[0].reason, "Trailing whitespace.");
+    assert.eql(JSHINT.errors[0].reason, "Unescaped '-'.");
+
+    assert.ok(!JSHINT(code[1]));
+    assert.eql(JSHINT.errors.length, 1);
+    assert.eql(JSHINT.errors[0].reason, "Unescaped '-'.");
+
+    // Regex dash is on
+    assert.ok(!JSHINT(code[0], { regexdash: true }));
+    assert.eql(JSHINT.errors.length, 1);
+    assert.eql(JSHINT.errors[0].reason, "Unescaped '-'.");
+    assert.ok(JSHINT(code[1], { regexdash: true }));
+};
+
+exports.onecase = function () {
+    var code = "switch (a) { case '1': b(); }";
+
+    assert.ok(!JSHINT(code));
+    assert.eql(JSHINT.errors.length, 1);
+    assert.eql(JSHINT.errors[0].reason, "This 'switch' should be an 'if'.");
+
+    assert.ok(JSHINT(code, { onecase: true }));
+};
+
+exports.validthis = function () {
+    var src = fs.readFileSync(__dirname + '/fixtures/strict_this.js', 'utf8');
+
+    assert.ok(!JSHINT(src));
+    assert.eql(JSHINT.errors.length, 3);
+    assert.eql(JSHINT.errors[0].reason, "Possible strict violation.");
+    assert.eql(JSHINT.errors[0].line, 8);
+    assert.eql(JSHINT.errors[1].reason, "Possible strict violation.");
+    assert.eql(JSHINT.errors[1].line, 9);
+    assert.eql(JSHINT.errors[2].reason, "Possible strict violation.");
+    assert.eql(JSHINT.errors[2].line, 11);
+
+    src = fs.readFileSync(__dirname + '/fixtures/strict_this2.js', 'utf8');
+    assert.ok(JSHINT(src));
+
+    // Test for erroneus use of validthis
+
+    var code = ['/*jshint validthis:true */', 'hello();'];
+    assert.ok(!JSHINT(code));
+    assert.eql(JSHINT.errors.length, 1);
+    assert.eql(JSHINT.errors[0].reason, "Option 'validthis' can't be used in a global scope.");
+
+    code = ['function x() {', '/*jshint validthis:heya */', 'hello();', '}'];
+    assert.ok(!JSHINT(code));
+    assert.eql(JSHINT.errors.length, 1);
+    assert.eql(JSHINT.errors[0].reason, "Bad option value.");
 };
